@@ -11,7 +11,7 @@ export class BuildingScene {
   private canvas: HTMLCanvasElement;
 
   private cubesGroup: THREE.Group;
-  private cursor!: THREE.Mesh;
+  private cursor: THREE.Mesh;
 
   private occupied = new Set<string>();
 
@@ -41,18 +41,15 @@ export class BuildingScene {
 
     this.camera.position.set(0, 0, 6);
 
-    // lights
     this.scene.add(new THREE.AmbientLight(0xffffff, 0.8));
 
     const light = new THREE.DirectionalLight(0xffffff, 1);
     light.position.set(2, 2, 2);
     this.scene.add(light);
 
-    // group
     this.cubesGroup = new THREE.Group();
     this.scene.add(this.cubesGroup);
 
-    // cursor cube
     const geo = new THREE.BoxGeometry(CELL, CELL, CELL);
     const mat = new THREE.MeshBasicMaterial({
       color: WIRE_COLOR,
@@ -64,11 +61,10 @@ export class BuildingScene {
   }
 
   updateHands(hands: HandData[]) {
-    this.buildHand = hands.find((h) => h.label === "Left") ?? null;
+    this.buildHand = hands.find(h => h.label === "Left") ?? null;
   }
 
   render() {
-    // update cursor even if no hand
     if (!this.buildHand) {
       this.renderer.render(this.scene, this.camera);
       return;
@@ -76,13 +72,28 @@ export class BuildingScene {
 
     const hand = this.buildHand;
 
-    const x = (hand.x - 0.5) * 4;
-    const y = -(hand.y - 0.5) * 4;
-    const z = hand.depth * 2;
+    // ✨ تحسين مهم: smoothing بسيط بدل قفزات
+    const x = THREE.MathUtils.lerp(
+      this.cursor.position.x,
+      (hand.x - 0.5) * 4,
+      0.35
+    );
+
+    const y = THREE.MathUtils.lerp(
+      this.cursor.position.y,
+      -(hand.y - 0.5) * 4,
+      0.35
+    );
+
+    const z = THREE.MathUtils.lerp(
+      this.cursor.position.z,
+      hand.depth * 3,
+      0.25
+    );
 
     this.cursor.position.set(x, y, z);
 
-    // PINCH = build cube
+    // 🤏 BUILD
     if (hand.isPinching) {
       const gx = Math.round(x / CELL);
       const gy = Math.round(y / CELL);
