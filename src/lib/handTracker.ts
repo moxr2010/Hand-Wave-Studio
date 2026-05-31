@@ -6,12 +6,16 @@ export interface HandData {
   x: number;
   y: number;
   depth: number;
+
   isPinching: boolean;
   pinchStrength: number;
+
   isOpen: boolean;
   openness: number;
+
   isFist: boolean;
   speed: number;
+
   landmarks: NormalizedLandmarkList;
 }
 
@@ -52,7 +56,7 @@ export class HandTracker {
       maxNumHands: 2,
       modelComplexity: 1,
       minDetectionConfidence: 0.7,
-      minTrackingConfidence: 0.6,
+      minTrackingConfidence: 0.7,
     });
 
     this.hands.onResults(this.handleResults.bind(this));
@@ -66,13 +70,17 @@ export class HandTracker {
     });
   }
 
+  // 🔥 FIXED INIT (هذا أهم تعديل)
   async init() {
-    await this.camera.start();
+    try {
+      await this.camera.start();
+      console.log("Camera started");
+    } catch (e) {
+      console.error("Camera failed:", e);
+    }
   }
 
-  detect() {
-    // MediaPipe camera handles updates automatically
-  }
+  detect() {}
 
   destroy() {
     this.camera.stop();
@@ -117,9 +125,8 @@ export class HandTracker {
       const wrist = lm[0];
       const pointer = lm[5];
 
-      const handSize = Math.hypot(
-        pointer.x - wrist.x,
-        pointer.y - wrist.y
+      const handSize = Math.sqrt(
+        (pointer.x - wrist.x) ** 2 + (pointer.y - wrist.y) ** 2
       );
 
       const depth = Math.min(1, handSize * 4);
@@ -127,13 +134,13 @@ export class HandTracker {
       const thumb = lm[4];
       const index = lm[8];
 
-      const pinchD = Math.hypot(
+      const pinchDist = Math.hypot(
         thumb.x - index.x,
         thumb.y - index.y
       );
 
-      const isPinching = pinchD < 0.04;
-      const pinchStrength = Math.max(0, 1 - pinchD / 0.04);
+      const isPinching = pinchDist < 0.04;
+      const pinchStrength = Math.max(0, 1 - pinchDist / 0.04);
 
       const isOpen =
         lm[8].y < lm[6].y &&
@@ -142,6 +149,7 @@ export class HandTracker {
         lm[20].y < lm[18].y;
 
       const openness = this.calcOpenness(lm, handSize);
+
       const isFist = openness < 0.2 && !isPinching;
 
       const now = performance.now();
@@ -154,7 +162,7 @@ export class HandTracker {
       const vx = (pointer.x - lx) / dt;
       const vy = (pointer.y - ly) / dt;
 
-      const speed = Math.min(1, Math.hypot(vx, vy));
+      const speed = Math.min(1, Math.sqrt(vx * vx + vy * vy) * 1000);
 
       this.lastXMap.set(label, pointer.x);
       this.lastYMap.set(label, pointer.y);
@@ -179,13 +187,13 @@ export class HandTracker {
   }
 
   private calcOpenness(lm: SmoothLm[], handSize: number) {
-    const tip = [4, 8, 12, 16, 20];
-    const base = [2, 5, 9, 13, 17];
+    const tips = [4, 8, 12, 16, 20];
+    const bases = [2, 5, 9, 13, 17];
 
     let open = 0;
 
     for (let i = 0; i < 5; i++) {
-      if (lm[tip[i]].y < lm[base[i]].y - handSize * 0.08) {
+      if (lm[tips[i]].y < lm[bases[i]].y - handSize * 0.08) {
         open++;
       }
     }
