@@ -2,8 +2,6 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { HandTracker, HandData } from "../lib/handTracker";
 import { BuildingScene } from "../lib/buildingScene";
 
-type Mode = "orbit" | "build" | "pan" | "delete";
-
 const HAND_CONNECTIONS: [number, number][] = [
   [0,1],[1,2],[2,3],[3,4],
   [0,5],[5,6],[6,7],[7,8],
@@ -15,25 +13,15 @@ const HAND_CONNECTIONS: [number, number][] = [
 
 const FINGERTIPS = [4, 8, 12, 16, 20];
 
-function drawOneHand(
-  ctx: CanvasRenderingContext2D,
-  hand: HandData,
-  w: number,
-  h: number,
-  color: string,
-) {
-  if (!hand?.landmarks) return;
-
+function drawOneHand(ctx: CanvasRenderingContext2D, hand: HandData, w: number, h: number, color: string) {
   const lm = hand.landmarks;
+  if (!lm) return;
+
   const px = (i: number) => (1 - lm[i].x) * w;
   const py = (i: number) => lm[i].y * h;
 
-  ctx.save();
   ctx.strokeStyle = `${color}88`;
-  ctx.lineWidth = 1.5;
-  ctx.shadowColor = color;
-  ctx.shadowBlur = 5;
-  ctx.lineCap = "round";
+  ctx.lineWidth = 2;
 
   for (const [a, b] of HAND_CONNECTIONS) {
     ctx.beginPath();
@@ -41,20 +29,14 @@ function drawOneHand(
     ctx.lineTo(px(b), py(b));
     ctx.stroke();
   }
-  ctx.restore();
 
-  ctx.save();
-  ctx.fillStyle = `${color}bb`;
-  ctx.shadowColor = color;
-  ctx.shadowBlur = 8;
+  ctx.fillStyle = color;
 
   for (const i of FINGERTIPS) {
     ctx.beginPath();
-    ctx.arc(px(i), py(i), 3.5, 0, Math.PI * 2);
+    ctx.arc(px(i), py(i), 4, 0, Math.PI * 2);
     ctx.fill();
   }
-
-  ctx.restore();
 }
 
 export default function HandWaveExperience() {
@@ -67,7 +49,7 @@ export default function HandWaveExperience() {
   const trackerRef = useRef<HandTracker | null>(null);
   const handsRef = useRef<HandData[]>([]);
 
-  const [status, setStatus] = useState<"loading" | "tracking" | "error">("loading");
+  const [status, setStatus] = useState("loading");
 
   const onHandData = useCallback((hands: HandData[]) => {
     handsRef.current = hands;
@@ -78,37 +60,43 @@ export default function HandWaveExperience() {
     let cancelled = false;
 
     async function init() {
-      const video = videoRef.current;
-      const threeC = threeCanvasRef.current;
-      const handC = handDrawRef.current;
-      const mpC = mediapipeCanvas.current;
+      const video = videoRef.current!;
+      const threeC = threeCanvasRef.current!;
+      const handC = handDrawRef.current!;
+      const mpC = mediapipeCanvas.current!;
 
-      if (!video || !threeC || !handC || !mpC) return;
+      // ✅ FIX 1: set canvas size
+      threeC.width = window.innerWidth;
+      threeC.height = window.innerHeight;
+      handC.width = window.innerWidth;
+      handC.height = window.innerHeight;
 
-      let scene: BuildingScene;
-
-      try {
-        scene = new BuildingScene(threeC);
-      } catch {
-        setStatus("error");
-        return;
-      }
-
+      const scene = new BuildingScene(threeC);
       sceneRef.current = scene;
-      setStatus("tracking");
 
-      let tracker: HandTracker;
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: true,
+        audio: false,
+      });
+
+      video.srcObject = stream;
+      await video.play();
+
+      const tracker = new HandTracker(video, mpC, onHandData);
+      trackerRef.current = tracker;
+      await tracker.init();
+
+      setStatus("tracking");
 
       const animate = () => {
         if (cancelled) return;
 
+        // 🔥 IMPORTANT: render 3D
         scene.render();
 
+        // draw hands overlay
         const ctx = handC.getContext("2d");
         if (ctx) {
-          handC.width = handC.clientWidth;
-          handC.height = handC.clientHeight;
-
           ctx.clearRect(0, 0, handC.width, handC.height);
 
           for (const h of handsRef.current) {
@@ -120,29 +108,12 @@ export default function HandWaveExperience() {
       };
 
       animate();
-
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: true,
-          audio: false,
-        });
-
-        if (cancelled) return;
-
-        video.srcObject = stream;
-        await video.play();
-
-        tracker = new HandTracker(video, mpC, onHandData);
-        trackerRef.current = tracker;
-
-        await tracker.init();
-      } catch (err) {
-        console.error(err);
-        setStatus("error");
-      }
     }
 
-    init();
+    init().catch((e) => {
+      console.error(e);
+      setStatus("error");
+    });
 
     return () => {
       cancelled = true;
@@ -152,8 +123,9 @@ export default function HandWaveExperience() {
   }, [onHandData]);
 
   return (
-    <div style={{ width: "100vw", height: "100vh", background: "black" }}>
+    <div style={{ width: "100vw", height: "100vh", position: "relative" }}>
 
+      {/* Video background */}
       <video
         ref={videoRef}
         style={{
@@ -162,23 +134,45 @@ export default function HandWaveExperience() {
           height: "100%",
           objectFit: "cover",
           transform: "scaleX(-1)",
+          zIndex: 0,
         }}
         muted
         playsInline
       />
 
-      <canvas ref={threeCanvasRef} style={{ position: "absolute" }} />
-      <canvas ref={handDrawRef} style={{ position: "absolute" }} />
+      {/* 3D scene */}
+      <canvas
+        ref={threeCanvasRef}
+        style={{
+          position: "absolute",
+          width: "100%",
+          height: "100%",
+          zIndex: 1,
+        }}
+      />
+
+      {/* hand overlay */}
+      <canvas
+        ref={handDrawRef}
+        style={{
+          position: "absolute",
+          width: "100%",
+          height: "100%",
+          zIndex: 2,
+        }}
+      />
+
+      {/* hidden mediapipe canvas */}
       <canvas ref={mediapipeCanvas} style={{ display: "none" }} />
 
       {status === "loading" && (
-        <div style={{ color: "white", position: "absolute" }}>
+        <div style={{ color: "white", position: "absolute", zIndex: 10 }}>
           Loading...
         </div>
       )}
 
       {status === "error" && (
-        <div style={{ color: "red", position: "absolute" }}>
+        <div style={{ color: "red", position: "absolute", zIndex: 10 }}>
           Camera error
         </div>
       )}
