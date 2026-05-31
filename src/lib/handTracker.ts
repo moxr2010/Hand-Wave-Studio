@@ -10,12 +10,6 @@ export interface HandData {
   isPinching: boolean;
   pinchStrength: number;
 
-  isOpen: boolean;
-  openness: number;
-
-  isFist: boolean;
-  speed: number;
-
   landmarks: NormalizedLandmarkList;
 }
 
@@ -59,12 +53,7 @@ export class HandTracker {
   }
 
   async init() {
-    try {
-      await this.camera.start();
-      console.log("✅ camera started");
-    } catch (e) {
-      console.error("❌ CAMERA FAILED:", e);
-    }
+    await this.camera.start();
   }
 
   destroy() {
@@ -73,7 +62,7 @@ export class HandTracker {
   }
 
   private onResults(results: Results) {
-    if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
+    if (!results.multiHandLandmarks?.length) {
       this.onHands([]);
       return;
     }
@@ -81,64 +70,29 @@ export class HandTracker {
     const out: HandData[] = [];
 
     results.multiHandLandmarks.forEach((lm, i) => {
-      const handed = results.multiHandedness?.[i]?.label;
+      const label =
+        results.multiHandedness?.[i]?.label === "Right" ? "Right" : "Left";
 
-      const label: "Left" | "Right" =
-        handed === "Right" ? "Right" : "Left";
-
-      const thumb = lm[4];
-      const index = lm[8];
-
-      // 🤏 pinch
-      const pinchDist = Math.hypot(
-        thumb.x - index.x,
-        thumb.y - index.y
-      );
-
-      const isPinching = pinchDist < 0.05;
-      const pinchStrength = Math.max(0, 1 - pinchDist / 0.05);
-
-      // 📏 depth
       const wrist = lm[0];
-      const mid = lm[5];
+      const index = lm[8];
+      const middle = lm[12];
 
-      const depth = Math.min(
-        1,
-        Math.hypot(mid.x - wrist.x, mid.y - wrist.y) * 4
-      );
+      // ✨ مركز اليد الحقيقي
+      const cx = (wrist.x + index.x + middle.x) / 3;
+      const cy = (wrist.y + index.y + middle.y) / 3;
 
-      // 🖱️ position (fixed mirror)
-      const x = (index.x - 0.5) * 2;
-      const y = -(index.y - 0.5) * 2;
+      // 🔥 تحويل نظيف للعالم
+      const x = (cx - 0.5) * 3;
+      const y = -(cy - 0.5) * 3;
 
-      // ⚡ speed
-      const now = performance.now();
-      const last = this.lastT.get(label) ?? now;
-      const dt = Math.max(1, now - last);
+      // depth = حجم اليد
+      const handSize = Math.hypot(index.x - wrist.x, index.y - wrist.y);
+      const depth = Math.min(1, handSize * 5);
 
-      const lx = this.lastX.get(label) ?? x;
-      const ly = this.lastY.get(label) ?? y;
-
-      const speed = Math.min(
-        1,
-        Math.hypot(x - lx, y - ly) / dt * 1000
-      );
-
-      this.lastX.set(label, x);
-      this.lastY.set(label, y);
-      this.lastT.set(label, now);
-
-      // ✋ open hand (simple but reliable)
-      const isOpen =
-        lm[8].y < lm[6].y &&
-        lm[12].y < lm[10].y &&
-        lm[16].y < lm[14].y &&
-        lm[20].y < lm[18].y;
-
-      const openness =
-        [8, 12, 16, 20].filter(i => lm[i].y < lm[i - 2].y).length / 4;
-
-      const isFist = openness < 0.25 && !isPinching;
+      // pinch
+      const pinch = Math.hypot(lm[4].x - lm[8].x, lm[4].y - lm[8].y);
+      const isPinching = pinch < 0.05;
+      const pinchStrength = Math.max(0, 1 - pinch / 0.05);
 
       out.push({
         label,
@@ -147,10 +101,6 @@ export class HandTracker {
         depth,
         isPinching,
         pinchStrength,
-        isOpen,
-        openness,
-        isFist,
-        speed,
         landmarks: lm,
       });
     });
