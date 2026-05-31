@@ -1,120 +1,117 @@
-import { useEffect, useRef, useState, useCallback } from "react";
-import { HandTracker, HandData } from "../lib/handTracker";
-import { ParticleScene } from "../lib/particleScene";
+import * as THREE from "three";
+import { HandData } from "./handTracker";
 
-export default function HandWaveExperience() {
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+const CELL = 0.25;
 
-  const trackerRef = useRef<HandTracker | null>(null);
-  const sceneRef = useRef<ParticleScene | null>(null);
+export class BuildingScene {
+  private renderer: THREE.WebGLRenderer;
+  private scene: THREE.Scene;
+  private camera: THREE.PerspectiveCamera;
 
-  const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
+  private cubes: THREE.Group;
+  private cursor: THREE.Mesh;
 
-  const currentHand = useRef<HandData | null>(null);
+  private hand: HandData | null = null;
+  private occupied = new Set<string>();
 
-  const onHands = useCallback((hands: HandData[]) => {
-    currentHand.current = hands.length > 0 ? hands[0] : null;
-    sceneRef.current?.updateHand(currentHand.current);
-  }, []);
+  private lastPinch = false;
 
-  useEffect(() => {
-    let cancelled = false;
+  constructor(canvas: HTMLCanvasElement) {
+    this.renderer = new THREE.WebGLRenderer({
+      canvas,
+      antialias: true,
+      alpha: true,
+    });
 
-    async function init() {
-      const video = videoRef.current;
-      const canvas = canvasRef.current;
+    this.renderer.setSize(window.innerWidth, window.innerHeight);
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
-      if (!video || !canvas) return;
+    this.scene = new THREE.Scene();
 
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: true,
-          audio: false,
-        });
+    this.camera = new THREE.PerspectiveCamera(
+      60,
+      window.innerWidth / window.innerHeight,
+      0.1,
+      1000
+    );
 
-        if (cancelled) return;
+    this.camera.position.set(0, 0, 6);
 
-        video.srcObject = stream;
-        await video.play();
+    this.scene.add(new THREE.AmbientLight(0xffffff, 1));
 
-        // Scene
-        const scene = new ParticleScene(canvas);
-        sceneRef.current = scene;
+    const light = new THREE.DirectionalLight(0xffffff, 1);
+    light.position.set(2, 3, 2);
+    this.scene.add(light);
 
-        // Tracker
-        const tracker = new HandTracker(video, canvas, onHands);
-        trackerRef.current = tracker;
+    this.cubes = new THREE.Group();
+    this.scene.add(this.cubes);
 
-        await tracker.init();
+    const geo = new THREE.BoxGeometry(CELL, CELL, CELL);
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0x00c8ff,
+      wireframe: true,
+    });
 
-        setStatus("ready");
+    this.cursor = new THREE.Mesh(geo, mat);
+    this.scene.add(this.cursor);
+  }
 
-        const animate = () => {
-          if (cancelled) return;
+  updateHands(hands: HandData[]) {
+    this.hand = hands.find(h => h.label === "Left") ?? null;
+  }
 
-          scene.render();
-          requestAnimationFrame(animate);
-        };
+  render() {
+    if (!this.hand) {
+      this.renderer.render(this.scene, this.camera);
+      return;
+    }
 
-        animate();
-      } catch (err) {
-        console.error(err);
-        setStatus("error");
+    const h = this.hand;
+
+    // 🎯 حركة ناعمة
+    this.cursor.position.lerp(
+      new THREE.Vector3(h.x, h.y, -h.depth * 2),
+      0.35
+    );
+
+    // 🤏 pinch edge detection
+    const pinchStart = h.isPinching && !this.lastPinch;
+
+    if (pinchStart) {
+      const gx = Math.round(this.cursor.position.x / CELL);
+      const gy = Math.round(this.cursor.position.y / CELL);
+      const gz = Math.round(this.cursor.position.z / CELL);
+
+      const key = `${gx},${gy},${gz}`;
+
+      if (!this.occupied.has(key)) {
+        this.occupied.add(key);
+
+        const cube = new THREE.Mesh(
+          new THREE.BoxGeometry(CELL, CELL, CELL),
+          new THREE.MeshStandardMaterial({
+            color: 0x003a55,
+            emissive: 0x001820,
+          })
+        );
+
+        cube.position.set(gx * CELL, gy * CELL, gz * CELL);
+        this.cubes.add(cube);
       }
     }
 
-    init();
+    this.lastPinch = h.isPinching;
 
-    return () => {
-      cancelled = true;
-      trackerRef.current?.destroy();
-      sceneRef.current?.destroy();
+    this.renderer.render(this.scene, this.camera);
+  }
 
-      const video = videoRef.current;
-      if (video?.srcObject) {
-        (video.srcObject as MediaStream)
-          .getTracks()
-          .forEach((t) => t.stop());
-      }
-    };
-  }, [onHands]);
+  resize() {
+    this.renderer.setSize(window.innerWidth, window.innerHeight);
+    this.camera.aspect = window.innerWidth / window.innerHeight;
+    this.camera.updateProjectionMatrix();
+  }
 
-  return (
-    <div style={{ width: "100vw", height: "100vh", background: "black" }}>
-      <video
-        ref={videoRef}
-        style={{
-          position: "absolute",
-          width: "100%",
-          height: "100%",
-          objectFit: "cover",
-          transform: "scaleX(-1)",
-        }}
-        muted
-        playsInline
-      />
-
-      <canvas
-        ref={canvasRef}
-        style={{
-          position: "absolute",
-          width: "100%",
-          height: "100%",
-        }}
-      />
-
-      {status === "loading" && (
-        <div style={{ color: "white", position: "absolute", top: 20, left: 20 }}>
-          Loading camera...
-        </div>
-      )}
-
-      {status === "error" && (
-        <div style={{ color: "red", position: "absolute", top: 20, left: 20 }}>
-          Camera error
-        </div>
-      )}
-    </div>
-  );
+  destroy() {
+    this.renderer.dispose();
+  }
 }
