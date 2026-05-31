@@ -29,9 +29,9 @@ export class BuildingScene {
     // ── Scene
     this.scene = new THREE.Scene();
 
-    // ── Camera (IMPORTANT: ثابتة وواضحة)
+    // ── Camera
     this.camera = new THREE.PerspectiveCamera(
-      60,
+      55,
       window.innerWidth / window.innerHeight,
       0.1,
       1000
@@ -42,12 +42,11 @@ export class BuildingScene {
 
     // ── Light
     this.scene.add(new THREE.AmbientLight(0xffffff, 1));
-
     const light = new THREE.DirectionalLight(0xffffff, 1);
     light.position.set(3, 3, 3);
     this.scene.add(light);
 
-    // ── Groups
+    // ── Group
     this.cubes = new THREE.Group();
     this.scene.add(this.cubes);
 
@@ -61,53 +60,60 @@ export class BuildingScene {
     this.cursor = new THREE.Mesh(geo, mat);
     this.scene.add(this.cursor);
 
-    // resize fix
+    // ── resize
     window.addEventListener("resize", () => this.resize());
+
+    // 🔥 مهم: تشغيل loop هنا (كان ناقص عندك)
+    this.animate();
   }
 
   updateHands(hands: HandData[]) {
-    this.hand = hands.find(h => h.label === "Left") ?? null;
+    this.hand = hands.find((h) => h.label === "Left") ?? null;
   }
 
+  // 🔥 MAIN LOOP
+  private animate = () => {
+    requestAnimationFrame(this.animate);
+
+    this.render();
+  };
+
   render() {
-    if (!this.hand) {
-      this.renderer.render(this.scene, this.camera);
-      return;
-    }
+    if (this.hand) {
+      const h = this.hand;
 
-    const h = this.hand;
+      // ✔️ إحداثيات نظيفة (مضبوطة للمشهد)
+      const targetX = (h.x - 0.5) * 4;
+      const targetY = -(h.y - 0.5) * 4;
+      const targetZ = -h.depth * 2;
 
-    // ── IMPORTANT: تحويل نظيف للإحداثيات
-    const targetX = (h.x - 0.5) * 6;
-    const targetY = -(h.y - 0.5) * 6;
-    const targetZ = -h.depth * 3;
+      // smooth cursor
+      this.cursor.position.x += (targetX - this.cursor.position.x) * 0.25;
+      this.cursor.position.y += (targetY - this.cursor.position.y) * 0.25;
+      this.cursor.position.z += (targetZ - this.cursor.position.z) * 0.25;
 
-    // smooth cursor
-    this.cursor.position.x += (targetX - this.cursor.position.x) * 0.3;
-    this.cursor.position.y += (targetY - this.cursor.position.y) * 0.3;
-    this.cursor.position.z += (targetZ - this.cursor.position.z) * 0.3;
+      // ── PINCH → cube
+      if (h.isPinching) {
+        const gx = Math.round(this.cursor.position.x / CELL);
+        const gy = Math.round(this.cursor.position.y / CELL);
+        const gz = Math.round(this.cursor.position.z / CELL);
 
-    // ── PINCH = place cube
-    if (h.isPinching) {
-      const gx = Math.round(this.cursor.position.x / CELL);
-      const gy = Math.round(this.cursor.position.y / CELL);
-      const gz = Math.round(this.cursor.position.z / CELL);
+        const key = `${gx},${gy},${gz}`;
 
-      const key = `${gx},${gy},${gz}`;
+        if (!this.occupied.has(key)) {
+          this.occupied.add(key);
 
-      if (!this.occupied.has(key)) {
-        this.occupied.add(key);
+          const cube = new THREE.Mesh(
+            new THREE.BoxGeometry(CELL, CELL, CELL),
+            new THREE.MeshStandardMaterial({
+              color: 0x003a55,
+              emissive: 0x001820,
+            })
+          );
 
-        const cube = new THREE.Mesh(
-          new THREE.BoxGeometry(CELL, CELL, CELL),
-          new THREE.MeshStandardMaterial({
-            color: 0x003a55,
-            emissive: 0x001820,
-          })
-        );
-
-        cube.position.set(gx * CELL, gy * CELL, gz * CELL);
-        this.cubes.add(cube);
+          cube.position.set(gx * CELL, gy * CELL, gz * CELL);
+          this.cubes.add(cube);
+        }
       }
     }
 
