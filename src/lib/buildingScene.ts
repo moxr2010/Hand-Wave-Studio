@@ -8,18 +8,14 @@ export class BuildingScene {
   private renderer: THREE.WebGLRenderer;
   private scene: THREE.Scene;
   private camera: THREE.PerspectiveCamera;
-  private canvas: HTMLCanvasElement;
 
   private cubesGroup: THREE.Group;
   private cursor: THREE.Mesh;
 
   private occupied = new Set<string>();
-
   private buildHand: HandData | null = null;
 
   constructor(canvas: HTMLCanvasElement) {
-    this.canvas = canvas;
-
     this.renderer = new THREE.WebGLRenderer({
       canvas,
       antialias: true,
@@ -33,23 +29,27 @@ export class BuildingScene {
     this.scene = new THREE.Scene();
 
     this.camera = new THREE.PerspectiveCamera(
-      50,
+      55,
       window.innerWidth / window.innerHeight,
       0.1,
       1000
     );
 
-    this.camera.position.set(0, 0, 6);
+    // 🔥 هذا أهم تعديل (كان يسبب اختفاء المكعب)
+    this.camera.position.set(0, 0, 8);
+    this.camera.lookAt(0, 0, 0);
 
-    this.scene.add(new THREE.AmbientLight(0xffffff, 0.8));
+    // lights (خفيفة لكن واضحة)
+    this.scene.add(new THREE.AmbientLight(0xffffff, 0.9));
 
-    const light = new THREE.DirectionalLight(0xffffff, 1);
-    light.position.set(2, 2, 2);
+    const light = new THREE.DirectionalLight(0xffffff, 1.2);
+    light.position.set(3, 3, 3);
     this.scene.add(light);
 
     this.cubesGroup = new THREE.Group();
     this.scene.add(this.cubesGroup);
 
+    // cursor
     const geo = new THREE.BoxGeometry(CELL, CELL, CELL);
     const mat = new THREE.MeshBasicMaterial({
       color: WIRE_COLOR,
@@ -58,10 +58,13 @@ export class BuildingScene {
 
     this.cursor = new THREE.Mesh(geo, mat);
     this.scene.add(this.cursor);
+
+    // 🔥 مهم: resize fix
+    window.addEventListener("resize", () => this.resize());
   }
 
   updateHands(hands: HandData[]) {
-    this.buildHand = hands.find(h => h.label === "Left") ?? null;
+    this.buildHand = hands.find((h) => h.label === "Left") ?? null;
   }
 
   render() {
@@ -72,32 +75,21 @@ export class BuildingScene {
 
     const hand = this.buildHand;
 
-    // ✨ تحسين مهم: smoothing بسيط بدل قفزات
-    const x = THREE.MathUtils.lerp(
-      this.cursor.position.x,
-      (hand.x - 0.5) * 4,
-      0.35
-    );
+    // 🔥 إصلاح الإحداثيات (كان سبب "اختفاء الحركة")
+    const targetX = (0.5 - hand.x) * 6;
+    const targetY = -(hand.y - 0.5) * 6;
+    const targetZ = -hand.depth * 3;
 
-    const y = THREE.MathUtils.lerp(
-      this.cursor.position.y,
-      -(hand.y - 0.5) * 4,
-      0.35
-    );
+    // smoothing
+    this.cursor.position.x = THREE.MathUtils.lerp(this.cursor.position.x, targetX, 0.35);
+    this.cursor.position.y = THREE.MathUtils.lerp(this.cursor.position.y, targetY, 0.35);
+    this.cursor.position.z = THREE.MathUtils.lerp(this.cursor.position.z, targetZ, 0.35);
 
-    const z = THREE.MathUtils.lerp(
-      this.cursor.position.z,
-      hand.depth * 3,
-      0.25
-    );
-
-    this.cursor.position.set(x, y, z);
-
-    // 🤏 BUILD
+    // 🤏 بناء مكعب
     if (hand.isPinching) {
-      const gx = Math.round(x / CELL);
-      const gy = Math.round(y / CELL);
-      const gz = Math.round(z / CELL);
+      const gx = Math.round(this.cursor.position.x / CELL);
+      const gy = Math.round(this.cursor.position.y / CELL);
+      const gz = Math.round(this.cursor.position.z / CELL);
 
       const key = `${gx},${gy},${gz}`;
 
