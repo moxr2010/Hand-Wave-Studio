@@ -55,8 +55,8 @@ export class HandTracker {
     this.hands.setOptions({
       maxNumHands: 2,
       modelComplexity: 1,
-      minDetectionConfidence: 0.7,
-      minTrackingConfidence: 0.7,
+      minDetectionConfidence: 0.75,
+      minTrackingConfidence: 0.75,
     });
 
     this.hands.onResults(this.handleResults.bind(this));
@@ -70,7 +70,7 @@ export class HandTracker {
     });
   }
 
-  // 🔥 FIXED INIT (هذا أهم تعديل)
+  // ✅ تشغيل الكاميرا
   async init() {
     try {
       await this.camera.start();
@@ -88,8 +88,7 @@ export class HandTracker {
   }
 
   private handleResults(results: Results) {
-    if (!results.multiHandLandmarks?.length) {
-      this.smoothedLmMap.clear();
+    if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
       this.onHands([]);
       return;
     }
@@ -100,10 +99,11 @@ export class HandTracker {
       const handedness = results.multiHandedness?.[i];
       const label = (handedness?.label ?? "Left") as "Left" | "Right";
 
+      // ── smoothing ──
       let smoothed = this.smoothedLmMap.get(label);
 
       if (!smoothed) {
-        smoothed = raw.map((l) => ({ x: l.x, y: l.y, z: l.z ?? 0 }));
+        smoothed = raw.map(l => ({ x: l.x, y: l.y, z: l.z ?? 0 }));
         this.smoothedLmMap.set(label, smoothed);
       } else {
         for (let j = 0; j < raw.length; j++) {
@@ -125,12 +125,14 @@ export class HandTracker {
       const wrist = lm[0];
       const pointer = lm[5];
 
-      const handSize = Math.sqrt(
-        (pointer.x - wrist.x) ** 2 + (pointer.y - wrist.y) ** 2
+      const handSize = Math.hypot(
+        pointer.x - wrist.x,
+        pointer.y - wrist.y
       );
 
       const depth = Math.min(1, handSize * 4);
 
+      // ── pinch ──
       const thumb = lm[4];
       const index = lm[8];
 
@@ -142,6 +144,7 @@ export class HandTracker {
       const isPinching = pinchDist < 0.04;
       const pinchStrength = Math.max(0, 1 - pinchDist / 0.04);
 
+      // ── open hand ──
       const isOpen =
         lm[8].y < lm[6].y &&
         lm[12].y < lm[10].y &&
@@ -152,8 +155,10 @@ export class HandTracker {
 
       const isFist = openness < 0.2 && !isPinching;
 
+      // ── speed ──
       const now = performance.now();
       const last = this.lastTimeMap.get(label) ?? now;
+
       const dt = Math.max(1, now - last);
 
       const lx = this.lastXMap.get(label) ?? pointer.x;
@@ -162,7 +167,7 @@ export class HandTracker {
       const vx = (pointer.x - lx) / dt;
       const vy = (pointer.y - ly) / dt;
 
-      const speed = Math.min(1, Math.sqrt(vx * vx + vy * vy) * 1000);
+      const speed = Math.min(1, Math.hypot(vx, vy) * 1000);
 
       this.lastXMap.set(label, pointer.x);
       this.lastYMap.set(label, pointer.y);
