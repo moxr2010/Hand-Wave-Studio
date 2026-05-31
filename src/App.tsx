@@ -1,4 +1,4 @@
-import HandWaveExperience from "@/pages/HandWaveExperience";
+import HandWaveExperience from "./pages/HandWaveExperience";
 
 function App() {
   return <HandWaveExperience />;
